@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Decentralized Exchange (DEX)</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8f9fa;
+            color: #212529;
+        }
+        .container {
+            background-color: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        h1, h2 {
+            color: #0d6efd;
+            margin-top: 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select, button {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+        button {
+            background-color: #0d6efd;
+            color: white;
+            border: none;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #0b5ed7;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        #balanceDisplay {
+            font-size: 18px;
+            padding: 15px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        #resultMessage {
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 20px;
+            display: none;
+        }
+        .success {
+            background-color: #d1e7dd;
+            color: #0f5132;
+            border: 1px solid #badbcc;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #842029;
+            border: 1px solid #f5c2c7;
+        }
+        .loading {
+            color: #0d6efd;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <h1>Decentralized Exchange</h1>
+    
+    <div class="container">
+        <h2>Your Balances</h2>
+        <div id="balanceDisplay">Loading balances...</div>
+        <button onclick="loadBalances()">Refresh Balances</button>
+    </div>
+
+    <div class="container">
+        <h2>Execute Trade</h2>
+        <form id="tradeForm">
+            <label for="accountId">Account ID:</label>
+            <input type="text" id="accountId" value="USER_001" required>
+            
+            <label for="side">Action:</label>
+            <select id="side" required>
+                <option value="BUY">BUY SYM with BTC</option>
+                <option value="SELL">SELL SYM for BTC</option>
+            </select>
+            
+            <label for="amount">Amount (SYM):</label>
+            <input type="number" id="amount" step="0.00000001" min="0" value="1" required>
+            
+            <button type="submit" id="submitButton">Execute Trade</button>
+        </form>
+        <div id="resultMessage"></div>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        // REPLACE THIS WITH YOUR DEPLOYED WEB APP URL FROM STEP 6
+        const WEB_APP_URL = "https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec";
+
+        // --- STATE ---
+        let currentNonce = Date.now(); // Generate a simple nonce based on timestamp
+
+        // --- DOM ELEMENT REFERENCES ---
+        const balanceDisplay = document.getElementById('balanceDisplay');
+        const tradeForm = document.getElementById('tradeForm');
+        const resultMessage = document.getElementById('resultMessage');
+        const submitButton = document.getElementById('submitButton');
+
+        // --- MAIN FUNCTIONS ---
+        // Load and display user balances for BTC and SYM
+        async function loadBalances() {
+            const accountId = document.getElementById('accountId').value;
+            balanceDisplay.textContent = 'Loading balances...';
+
+            try {
+                const [btcBalance, symBalance] = await Promise.all([
+                    callApi({ action: 'getBalance', accountId: accountId, asset: 'BTC' }),
+                    callApi({ action: 'getBalance', accountId: accountId, asset: 'SYM' })
+                ]);
+
+                // Convert micro-units to whole units for display (1 SYM = 100,000,000 micro)
+                const btcAvailable = (btcBalance.availableMicro / 100000000).toFixed(8);
+                const symAvailable = (symBalance.availableMicro / 100000000).toFixed(8);
+
+                balanceDisplay.innerHTML = `
+                    <strong>BTC:</strong> ${btcAvailable} <br>
+                    <strong>SYM:</strong> ${symAvailable}
+                `;
+            } catch (error) {
+                balanceDisplay.textContent = 'Error loading balances.';
+                console.error("Balance load error:", error);
+            }
+        }
+
+        // Handle the trade form submission
+        async function executeTrade(event) {
+            event.preventDefault(); // Prevent the form from reloading the page
+            setResultMessage('', ''); // Clear previous result
+            submitButton.disabled = true;
+            submitButton.textContent = 'Processing...';
+
+            const accountId = document.getElementById('accountId').value;
+            const side = document.getElementById('side').value;
+            const amount = parseFloat(document.getElementById('amount').value);
+
+            // Convert whole units to micro-units for the API (1 SYM = 100,000,000 micro)
+            const amountMicro = Math.floor(amount * 100000000);
+            currentNonce++; // Increment nonce for each new trade request
+
+            const payload = {
+                action: 'executeTrade',
+                accountId: accountId,
+                pair: 'SYM/BTC',
+                side: side,
+                amountMicro: amountMicro,
+                nonce: currentNonce
+            };
+
+            try {
+                const result = await callApi(payload);
+                if (result.success) {
+                    setResultMessage(`Trade successful! TX ID: ${result.data.txId}. Fee: ${result.data.feeBps} bps.`, 'success');
+                    loadBalances(); // Refresh the balances after a successful trade
+                } else {
+                    setResultMessage(`Trade failed: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                setResultMessage('Network error. Please try again.', 'error');
+                console.error("Trade execution error:", error);
+            } finally {
+                submitButton.disabled = false;
+                submitButton.textContent = 'Execute Trade';
+            }
+        }
+
+        // --- UTILITY FUNCTIONS ---
+        // Generic function to call the Google Apps Script Web App
+        async function callApi(payload) {
+            const response = await fetch(WEB_APP_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const responseData = await response.json();
+            if (!responseData.success) {
+                throw new Error(responseData.message || 'API call failed');
+            }
+            return responseData.data;
+        }
+
+        // Display a message to the user
+        function setResultMessage(message, type) {
+            resultMessage.textContent = message;
+            resultMessage.className = type;
+            resultMessage.style.display = message ? 'block' : 'none';
+        }
+
+        // --- INITIALIZE THE PAGE ---
+        // Attach the event listener to the form
+        tradeForm.addEventListener('submit', executeTrade);
+        // Load balances when the page finishes loading
+        window.onload = loadBalances;
+    </script>
+</body>
+</html>
